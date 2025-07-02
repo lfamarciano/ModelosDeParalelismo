@@ -11,50 +11,55 @@ def is_anomaly(series):
 
 def calculate_metrics_sequentially(df: pd.DataFrame):
     """
-    Calcula as três métricas necessárias de forma sequencial usando pandas.
+    Calcula as três métricas necessárias de forma sequencial usando Pandas.
     Esta é a implementação de referência.
     """
     metrics = {}
     
-    #  Métrica 1: Percentual de anomalias por sensor por estação 
-    anomaly_cols = {}
-    grouped_by_station = df.groupby('id_estacao')
+    # --- Métrica 1: Percentual de anomalias por sensor por estação ---
+    # Primeiro, criamos um DataFrame que nos diz, para cada ponto, se ele é uma anomalia
+    anomaly_mask_df = df.groupby('id_estacao')[['temperatura', 'umidade', 'pressao']].transform(is_anomaly)
     
-    for station, station_df in grouped_by_station:
-        anomaly_cols[('temperatura', station)] = is_anomaly(station_df['temperatura'])
-        anomaly_cols[('umidade', station)] = is_anomaly(station_df['umidade'])
-        anomaly_cols[('pressao', station)] = is_anomaly(station_df['pressao'])
-    
-    # Unifica os resultados de anomalias em um unico df
-    anomaly_df = pd.concat(anomaly_cols).unstack(level=1)
-    
-    # Calcula o percentual
-    percent_anomalies = anomaly_df.mean().groupby(level=1).apply(lambda x: x * 100)
-    metrics['percentual_anomalias'] = percent_anomalies.unstack(level=0)
+    # Agora, calculamos a média (que para booleanos, é o percentual) e multiplicamos por 100
+    # Agrupamos pelo id_estacao do DataFrame original para obter os resultados por estação
+    percentual_anomalias = anomaly_mask_df.groupby(df['id_estacao']).mean() * 100
+    metrics['percentual_anomalias'] = percentual_anomalias
 
 
-    #  Métrica 2: Média móvel por região (excluindo anomalias) 
-    # Cria uma máscara para todas as anomalias
-    df_with_anomalies = df.join(anomaly_df.droplevel(0, axis=1).any(axis=1).rename('is_any_anomaly'))
+    # --- Métrica 2: Média móvel por região (excluindo anomalias) ---
+    # Cria uma máscara para identificar linhas que contêm QUALQUER anomalia
+    is_any_anomaly = anomaly_mask_df.any(axis=1)
     
     # Remove as linhas com qualquer anomalia
-    clean_df = df_with_anomalies[~df_with_anomalies['is_any_anomaly']].copy()
+    clean_df = df[~is_any_anomaly].copy()
 
     # Calcula a média móvel de 10 minutos por região
     # O DataFrame já vem ordenado por timestamp do gerador
-    moving_avg = clean_df.groupby('regiao')[['temperatura', 'umidade', 'pressao']].rolling(window=10, min_periods=1).mean()
-    metrics['media_movel_regiao'] = moving_avg.reset_index()
+    # Usamos include_groups=False para evitar um FutureWarning no Pandas 2.x
+    moving_avg = (
+        clean_df.groupby('regiao', group_keys=False, as_index=False)
+        [['temperatura', 'umidade', 'pressao']]
+        .rolling(window=10, min_periods=1)
+        .mean()
+    )
+    # Adicionamos as colunas de identificação de volta para clareza
+    metrics['media_movel_regiao'] = pd.concat([
+        clean_df[['timestamp', 'id_estacao', 'regiao']].reset_index(drop=True),
+        moving_avg.reset_index(drop=True)
+    ], axis=1)
 
 
-    #  Métrica 3: Períodos com anomalias concorrentes por estação 
-    # Usa o DataFrame que já tem a identificação de anomalias por sensor
-    df_anomalies_only = df.join(anomaly_df.droplevel(0, axis=1))
+    # --- Métrica 3: Períodos com anomalias concorrentes por estação ---
+    # Adicionamos a máscara de anomalias ao DataFrame original para facilitar o agrupamento
+    df_anomalies_only = df.join(anomaly_mask_df.rename(
+        columns=lambda c: f"{c}_anomalo"
+    ))
     
     # Agrupa por estação e janelas de 10 minutos
     periods = df_anomalies_only.groupby([
         'id_estacao',
         pd.Grouper(key='timestamp', freq='10min')
-    ])[['temperatura', 'umidade', 'pressao']].any() # Verifica se há alguma anomalia na janela
+    ])[['temperatura_anomalo', 'umidade_anomalo', 'pressao_anomalo']].any()
 
     # Conta quantos sensores tiveram anomalia na janela e filtra por > 1
     concurrent_anomalies = periods.sum(axis=1)
