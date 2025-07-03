@@ -1,0 +1,14 @@
+# docker-compose.yml
+# docker-compose run --rm approach-a-cpp data/dados_meteorologicos.csv data/resultado_cpp.json 8
+
+version: '3.8'
+
+services:
+  # Serviço para executar a Abordagem A (C++)
+  approach-a-cpp:
+    build:
+      context: ./src/approach_a_multithreading
+      dockerfile: Dockerfile
+    
+    volumes:
+      - ./data:/app/data
