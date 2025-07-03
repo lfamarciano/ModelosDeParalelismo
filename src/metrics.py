@@ -1,10 +1,15 @@
 import pandas as pd
 from pathlib import Path
+import json
+import time
 
 def is_anomaly(series):
     """Identifica anomalias em uma série de dados (valores fora de média ± 3*std)."""
     mean = series.mean()
     std = series.std()
+    # Evita divisão por zero se todos os valores forem iguais
+    if std == 0:
+        return pd.Series([False] * len(series), index=series.index)
     lower_bound = mean - 3 * std
     upper_bound = mean + 3 * std
     return ~series.between(lower_bound, upper_bound)
@@ -16,56 +21,43 @@ def calculate_metrics_sequentially(df: pd.DataFrame):
     """
     metrics = {}
     
-    # --- Métrica 1: Percentual de anomalias por sensor por estação ---
-    # Primeiro, criamos um DataFrame que nos diz, para cada ponto, se ele é uma anomalia
+    #  Métrica 1: Percentual de anomalias por sensor por estação 
     anomaly_mask_df = df.groupby('id_estacao')[['temperatura', 'umidade', 'pressao']].transform(is_anomaly)
-    
-    # Agora, calculamos a média (que para booleanos, é o percentual) e multiplicamos por 100
-    # Agrupamos pelo id_estacao do DataFrame original para obter os resultados por estação
     percentual_anomalias = anomaly_mask_df.groupby(df['id_estacao']).mean() * 100
     metrics['percentual_anomalias'] = percentual_anomalias
 
 
-    # --- Métrica 2: Média móvel por região (excluindo anomalias) ---
-    # Cria uma máscara para identificar linhas que contêm QUALQUER anomalia
+    #  Métrica 2: Média móvel por região (excluindo anomalias) 
     is_any_anomaly = anomaly_mask_df.any(axis=1)
     
-    # Remove as linhas com qualquer anomalia
     clean_df = df[~is_any_anomaly].copy()
-
-    # Calcula a média móvel de 10 minutos por região
-    # O DataFrame já vem ordenado por timestamp do gerador
-    # Usamos include_groups=False para evitar um FutureWarning no Pandas 2.x
+    
     moving_avg = (
         clean_df.groupby('regiao', group_keys=False, as_index=False)
         [['temperatura', 'umidade', 'pressao']]
         .rolling(window=10, min_periods=1)
         .mean()
     )
-    # Adicionamos as colunas de identificação de volta para clareza
+    
     metrics['media_movel_regiao'] = pd.concat([
         clean_df[['timestamp', 'id_estacao', 'regiao']].reset_index(drop=True),
         moving_avg.reset_index(drop=True)
     ], axis=1)
 
 
-    # --- Métrica 3: Períodos com anomalias concorrentes por estação ---
-    # Adicionamos a máscara de anomalias ao DataFrame original para facilitar o agrupamento
+    #  Métrica 3: Períodos com anomalias concorrentes por estação 
     df_anomalies_only = df.join(anomaly_mask_df.rename(
         columns=lambda c: f"{c}_anomalo"
     ))
     
-    # Agrupa por estação e janelas de 10 minutos
     periods = df_anomalies_only.groupby([
         'id_estacao',
         pd.Grouper(key='timestamp', freq='10min')
     ])[['temperatura_anomalo', 'umidade_anomalo', 'pressao_anomalo']].any()
 
-    # Conta quantos sensores tiveram anomalia na janela e filtra por > 1
     concurrent_anomalies = periods.sum(axis=1)
     concurrent_periods = concurrent_anomalies[concurrent_anomalies > 1]
     
-    # Conta o número de períodos concorrentes por estação
     num_concurrent_periods = concurrent_periods.groupby('id_estacao').count()
     metrics['periodos_concorrentes'] = num_concurrent_periods.to_frame(name='num_periodos_concorrentes')
 
@@ -79,21 +71,34 @@ if __name__ == '__main__':
         print("Por favor, execute 'python src/data_generator.py' primeiro.")
     else:
         print(f"Carregando dados de {data_path}...")
-        # Lendo o timestamp como data para o Grouper funcionar
         df_principal = pd.read_csv(data_path, parse_dates=['timestamp'])
         
         print("Calculando métricas (implementação de referência)...")
-        resultados = calculate_metrics_sequentially(df_principal)
+        start_time = time.perf_counter()
+        resultados_df = calculate_metrics_sequentially(df_principal)
+        end_time = time.perf_counter()
+        duration_ms = (end_time - start_time) * 1000
+        
+        # --- Estruturação do JSON de Saída ---
+        final_json_output = {
+            "tempo_execucao_ms": duration_ms,
+            "resultados_por_estacao": {}
+            # Métrica 2 (média móvel) é omitida para manter a comparação direta com a saída C++
+        }
+        
+        # Estrutura os resultados das métricas 1 e 3
+        all_stations = df_principal['id_estacao'].unique()
+        metric_1 = resultados_df['percentual_anomalias'].to_dict('index')
+        metric_3 = resultados_df['periodos_concorrentes']['num_periodos_concorrentes'].to_dict()
 
-        print("\n--- RESULTADOS DE REFERÊNCIA ---")
+        for station in sorted(all_stations):
+            final_json_output["resultados_por_estacao"][station] = {
+                "percentual_anomalias": metric_1.get(station, {}),
+                "periodos_concorrentes": metric_3.get(station, 0)
+            }
         
-        print("\n[Métrica 1: Percentual de Anomalias por Estação (%)]")
-        print(resultados['percentual_anomalias'])
-
-        print("\n[Métrica 3: Contagem de Períodos com Anomalias Concorrentes por Estação]")
-        print(resultados['periodos_concorrentes'])
+        output_path = Path("data/resultado_referencia.json")
+        with open(output_path, 'w') as f:
+            json.dump(final_json_output, f, indent=4)
         
-        print("\n[Métrica 2: Média Móvel por Região (últimos 5 registros)]")
-        print(resultados['media_movel_regiao'].tail())
-        
-        print("\n--- FIM DOS RESULTADOS ---")
+        print(f"\nResultados de referência salvos em: {output_path}")
