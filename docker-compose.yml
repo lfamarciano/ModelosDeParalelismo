@@ -1,11 +1,25 @@
 # docker-compose.yml
-# docker-compose run --rm approach-a-cpp data/dados_meteorologicos.csv data/resultado_cpp.json 8
+# Modelo de comando para executar um serviço:
+# docker-compose run <serviço> <comando a ser executado dentro do contêiner>
+# Exemplos:
+# > docker-compose run --rm python-app python src/data_generator.py 12 60 0.02
+# > docker-compose run --rm cpp-app ./processador_cpp data/dados_meteorologicos.csv data/resultado_cpp.json 8
+# > docker-compose run --rm python-app python src/metrics.py
+# > docker-compose run --rm python-app python src/compare_results.py data/resultado_referencia.json data/resultado_cpp.json
 
 version: '3.8'
 
 services:
+  # Serviço para executar os scripts Python
+  python-app:
+    build:
+      context: . # raiz do projeto
+      dockerfile: Dockerfile.python
+    volumes:
+      - ./data:/app/data
+
   # Serviço para executar a Abordagem A (C++)
-  approach-a-cpp:
+  cpp-app:
     build:
       context: ./src/approach_a_multithreading
       dockerfile: Dockerfile
