@@ -1,5 +1,5 @@
 {
-    "resultados": {
+    "resultados_por_estacao": {
         "STA-001": {
             "percentual_anomalias": {
                 "pressao": 0.0,
@@ -97,5 +97,5 @@
             "periodos_concorrentes": 0
         }
     },
-    "tempo_execucao_ms": 15.730217
+    "tempo_execucao_ms": 9.024885
 }
