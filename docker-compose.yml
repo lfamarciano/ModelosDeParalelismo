@@ -3,7 +3,7 @@
 # docker-compose run <serviço> <comando a ser executado dentro do contêiner>
 # Exemplos:
 # > docker-compose run --rm python-app python src/data_generator.py 12 60 0.02
-# > docker-compose run --rm cpp-app ./processador_cpp data/dados_meteorologicos.csv data/resultado_cpp.json 8
+# > docker-compose run --rm cpp-app data/dados_meteorologicos.csv data/resultado_cpp.json 4
 # > docker-compose run --rm python-app python src/metrics.py
 # > docker-compose run --rm python-app python src/compare_results.py data/resultado_referencia.json data/resultado_cpp.json
 
