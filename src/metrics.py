@@ -29,20 +29,21 @@ def calculate_metrics_sequentially(df: pd.DataFrame):
 
     #  Métrica 2: Média móvel por região (excluindo anomalias) 
     is_any_anomaly = anomaly_mask_df.any(axis=1)
-    
     clean_df = df[~is_any_anomaly].copy()
     
-    moving_avg = (
-        clean_df.groupby('regiao', group_keys=False, as_index=False)
-        [['temperatura', 'umidade', 'pressao']]
-        .rolling(window=10, min_periods=1)
-        .mean()
-    )
+    # Garante que os dados estão ordenados por tempo dentro de cada região antes de calcular a média móvel
+    clean_df = clean_df.sort_values(by=['regiao', 'timestamp'])
     
-    metrics['media_movel_regiao'] = pd.concat([
-        clean_df[['timestamp', 'id_estacao', 'regiao']].reset_index(drop=True),
-        moving_avg.reset_index(drop=True)
-    ], axis=1)
+    rolling_cols = ['temperatura', 'umidade', 'pressao']
+    # Calcula a média móvel
+    moving_avg_values = clean_df.groupby('regiao')[rolling_cols].rolling(window=10, min_periods=1).mean()
+    
+    # Remove o MultiIndex para poder juntar os dados de volta
+    moving_avg_values = moving_avg_values.reset_index(level=0, drop=True)
+
+    # Junta os resultados da média móvel ao DataFrame limpo
+    media_movel_df = clean_df.join(moving_avg_values.rename(columns=lambda c: f"{c}_media_movel"))
+    metrics['media_movel_regiao'] = media_movel_df
 
 
     #  Métrica 3: Períodos com anomalias concorrentes por estação 
@@ -71,6 +72,7 @@ if __name__ == '__main__':
         print("Por favor, execute 'python src/data_generator.py' primeiro.")
     else:
         print(f"Carregando dados de {data_path}...")
+        
         df_principal = pd.read_csv(data_path, parse_dates=['timestamp'])
         
         print("Calculando métricas (implementação de referência)...")
@@ -82,8 +84,8 @@ if __name__ == '__main__':
         # --- Estruturação do JSON de Saída ---
         final_json_output = {
             "tempo_execucao_ms": duration_ms,
-            "resultados_por_estacao": {}
-            # Métrica 2 (média móvel) é omitida para manter a comparação direta com a saída C++
+            "resultados_por_estacao": {},
+            "media_movel_por_regiao": {}
         }
         
         # Estrutura os resultados das métricas 1 e 3
@@ -96,9 +98,17 @@ if __name__ == '__main__':
                 "percentual_anomalias": metric_1.get(station, {}),
                 "periodos_concorrentes": metric_3.get(station, 0)
             }
+            
+        metric_2_df = resultados_df['media_movel_regiao']
+        metric_2_df['timestamp'] = metric_2_df['timestamp'].astype(str)
+        
+        # Agrupa os resultados da média móvel por região
+        for region, group_df in metric_2_df.groupby('regiao'):
+            final_json_output["media_movel_por_regiao"][region] = group_df.to_dict('records')
         
         output_path = Path("data/resultado_referencia.json")
         with open(output_path, 'w') as f:
             json.dump(final_json_output, f, indent=4)
         
         print(f"\nResultados de referência salvos em: {output_path}")
+        print(f"Tempo de execução: {duration_ms:.2f} ms")
