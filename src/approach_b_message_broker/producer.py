@@ -1,6 +1,7 @@
 # antes de rodar garanta que o RabbitMQ e Redis estão rodando
 # > docker-compose up rabbitmq redis
 # > docker-compose run --rm python-app python src/approach_b_message_broker/producer.py
+
 import pika
 import pandas as pd
 from pathlib import Path

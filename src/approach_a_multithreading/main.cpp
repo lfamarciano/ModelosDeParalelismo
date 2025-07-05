@@ -1,5 +1,7 @@
-// g++ -std=c++17 -O3 -pthread src/approach_a_multithreading/main.cpp -o processador_cpp
-// ./processador_cpp data/dados_meteorologicos.csv data/resultado_cpp.json 8
+// Versão final com paralelismo por estação
+// Compilar: g++ -std=c++17 -O3 -pthread optimized_main.cpp -o processador_cpp
+// Executar: ./processador_cpp data/dados_meteorologicos.csv data/resultado_cpp.json 8
+
 #include <iostream>
 #include <vector>
 #include <string>
@@ -14,132 +16,87 @@
 #include <iomanip>
 #include <fstream>
 #include <deque>
+#include <sstream>
 
 #include "include/csv.h"
 #include "include/json.hpp"
 
 using json = nlohmann::json;
 
-// Estrutura para os dados brutos
 struct DataRow {
-    long long timestamp_ms; 
+    long long timestamp_ms;
+    std::string timestamp_str;
     std::string station_id;
     std::string region;
     double temperature;
     double humidity;
     double pressure;
-    // Marcadores para anomalias
-    bool temp_is_anomaly = false;
-    bool hum_is_anomaly = false;
-    bool press_is_anomaly = false;
+    bool is_anomalous = false;
 };
 
-// Estruturas para os resultados
 struct StationMetrics {
     std::map<std::string, double> anomaly_percentages;
     long concurrent_anomaly_periods = 0;
 };
 
-// Serialização da struct criada para JSON
-void to_json(json& j, const StationMetrics& sm) {
-    j = json{
-        {"percentual_anomalias", sm.anomaly_percentages},
-        {"periodos_concorrentes", sm.concurrent_anomaly_periods}
-    };
-}
-
-// Mutex para proteger o acesso à fila de tarefas e ao mapa de resultados
-std::mutex tasks_mutex;
-std::mutex results_mutex;
-
-// Função para identificar anomalias
 bool is_anomaly(double value, double mean, double std_dev) {
+    if (std_dev == 0) return false;
     return value < mean - 3 * std_dev || value > mean + 3 * std_dev;
 }
 
-// Lógica que cada thread do pool executa
-void worker_logic(
-    std::vector<std::string>& station_tasks,
-    const std::map<std::string, std::vector<int>>& station_data_indices,
-    std::vector<DataRow>& all_data,
-    std::map<std::string, StationMetrics>& results
-) {
-    while (true) {
-        std::string current_station_id;
+StationMetrics process_station(std::vector<DataRow>& all_data, const std::vector<int>& indices, const std::string& station_id) {
+    StationMetrics metrics;
+    double temp_sum = 0, hum_sum = 0, press_sum = 0;
+    for (int idx : indices) {
+        temp_sum += all_data[idx].temperature;
+        hum_sum += all_data[idx].humidity;
+        press_sum += all_data[idx].pressure;
+    }
+    double n = indices.size();
+    double temp_mean = temp_sum / n;
+    double hum_mean = hum_sum / n;
+    double press_mean = press_sum / n;
 
-        // Pega uma tarefa da fila de forma segura
-        {
-            std::lock_guard<std::mutex> lock(tasks_mutex);
-            if (station_tasks.empty()) {
-                break; // Fila vazia, a thread termina
-            }
-            current_station_id = station_tasks.back();
-            station_tasks.pop_back();
-        }
+    double temp_sq_sum = 0, hum_sq_sum = 0, press_sq_sum = 0;
+    for (int idx : indices) {
+        temp_sq_sum += std::pow(all_data[idx].temperature - temp_mean, 2);
+        hum_sq_sum += std::pow(all_data[idx].humidity - hum_mean, 2);
+        press_sq_sum += std::pow(all_data[idx].pressure - press_mean, 2);
+    }
+    double temp_std = std::sqrt(temp_sq_sum / n);
+    double hum_std = std::sqrt(hum_sq_sum / n);
+    double press_std = std::sqrt(press_sq_sum / n);
 
-        // Se não houver dados para a estação, pula para a próxima
-        const auto& indices = station_data_indices.at(current_station_id);
-        if (indices.empty()) continue;
+    long temp_anom = 0, hum_anom = 0, press_anom = 0;
+    std::map<long, std::set<std::string>> concurrent_map;
 
-        // Calcular Média e Desvio Padrão
-        double temp_sum = 0, hum_sum = 0, press_sum = 0;
-        for (int idx : indices) {
-            temp_sum += all_data[idx].temperature;
-            hum_sum += all_data[idx].humidity;
-            press_sum += all_data[idx].pressure;
-        }
-        double temp_mean = temp_sum / indices.size();
-        double hum_mean = hum_sum / indices.size();
-        double press_mean = press_sum / indices.size();
-        
-        double temp_sq_sum = 0, hum_sq_sum = 0, press_sq_sum = 0;
-        for (int idx : indices) {
-            temp_sq_sum += (all_data[idx].temperature - temp_mean) * (all_data[idx].temperature - temp_mean);
-            hum_sq_sum += (all_data[idx].humidity - hum_mean) * (all_data[idx].humidity - hum_mean);
-            press_sq_sum += (all_data[idx].pressure - press_mean) * (all_data[idx].pressure - press_mean);
-        }
-        double temp_std = std::sqrt(temp_sq_sum / indices.size());
-        double hum_std = std::sqrt(hum_sq_sum / indices.size());
-        double press_std = std::sqrt(press_sq_sum / indices.size());
+    for (int idx : indices) {
+        auto& row = all_data[idx];
+        bool temp_a = is_anomaly(row.temperature, temp_mean, temp_std);
+        bool hum_a = is_anomaly(row.humidity, hum_mean, hum_std);
+        bool press_a = is_anomaly(row.pressure, press_mean, press_std);
+        if (temp_a || hum_a || press_a) row.is_anomalous = true;
+        if (temp_a) temp_anom++;
+        if (hum_a) hum_anom++;
+        if (press_a) press_anom++;
 
-        // Calcular Métricas 1 e 3 e marcar anomalias no vetor principal de dados
-        long temp_anomalies = 0, hum_anomalies = 0, press_anomalies = 0;
-        std::map<long, std::set<std::string>> concurrent_map;
-
-        for (int idx : indices) {
-            bool temp_is_a = is_anomaly(all_data[idx].temperature, temp_mean, temp_std);
-            bool hum_is_a = is_anomaly(all_data[idx].humidity, hum_mean, hum_std);
-            bool press_is_a = is_anomaly(all_data[idx].pressure, press_mean, press_std);
-
-            if (temp_is_a) { temp_anomalies++; all_data[idx].temp_is_anomaly = true; }
-            if (hum_is_a) { hum_anomalies++; all_data[idx].hum_is_anomaly = true; }
-            if (press_is_a) { press_anomalies++; all_data[idx].press_is_anomaly = true; }
-
-            if (temp_is_a || hum_is_a || press_is_a) {
-                long time_bucket = all_data[idx].timestamp_ms / (1000 * 60 * 10); // Bucket de 10 min
-                if (temp_is_a) concurrent_map[time_bucket].insert("temperatura");
-                if (hum_is_a) concurrent_map[time_bucket].insert("umidade");
-                if (press_is_a) concurrent_map[time_bucket].insert("pressao");
-            }
-        }
-
-        StationMetrics station_metrics;
-        station_metrics.anomaly_percentages["temperatura"] = (static_cast<double>(temp_anomalies) / indices.size()) * 100.0;
-        station_metrics.anomaly_percentages["umidade"] = (static_cast<double>(hum_anomalies) / indices.size()) * 100.0;
-        station_metrics.anomaly_percentages["pressao"] = (static_cast<double>(press_anomalies) / indices.size()) * 100.0;
-
-        for (const auto& pair : concurrent_map) {
-            if (pair.second.size() > 1) {
-                station_metrics.concurrent_anomaly_periods++;
-            }
-        }
-
-        // Adiciona o resultado ao mapa de resultados de forma segura
-        {
-            std::lock_guard<std::mutex> lock(results_mutex);
-            results[current_station_id] = station_metrics;
+        if (temp_a || hum_a || press_a) {
+            long bucket = row.timestamp_ms / (1000 * 60 * 10);
+            if (temp_a) concurrent_map[bucket].insert("temperatura");
+            if (hum_a) concurrent_map[bucket].insert("umidade");
+            if (press_a) concurrent_map[bucket].insert("pressao");
         }
     }
+
+    metrics.anomaly_percentages["temperatura"] = (temp_anom / n) * 100.0;
+    metrics.anomaly_percentages["umidade"] = (hum_anom / n) * 100.0;
+    metrics.anomaly_percentages["pressao"] = (press_anom / n) * 100.0;
+
+    for (const auto& [bucket, set] : concurrent_map) {
+        if (set.size() > 1) metrics.concurrent_anomaly_periods++;
+    }
+
+    return metrics;
 }
 
 int main(int argc, char* argv[]) {
@@ -148,121 +105,107 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::string csv_path = argv[1];
-    std::string json_path = argv[2];
+    std::string csv_path = argv[1], json_path = argv[2];
     int num_threads = std::stoi(argv[3]);
 
-    auto start_time = std::chrono::high_resolution_clock::now();
-
-    // Carrega dados do CSV para a memória
     std::vector<DataRow> all_data;
-    std::map<std::string, std::vector<int>> station_data_indices;
     try {
         io::CSVReader<6> in(csv_path);
         in.read_header(io::ignore_extra_column, "timestamp", "id_estacao", "regiao", "temperatura", "umidade", "pressao");
-        
-        int index = 0;
-        std::string ts_str, station, region;
+        std::string ts, station, region;
         double temp, hum, press;
-        while (in.read_row(ts_str, station, region, temp, hum, press)) {
-            DataRow row;
+        while (in.read_row(ts, station, region, temp, hum, press)) {
             std::tm tm = {};
-            std::stringstream ss(ts_str);
+            std::stringstream ss(ts);
             ss >> std::get_time(&tm, "%Y-%m-%d %H:%M:%S");
-            auto time_point = std::chrono::system_clock::from_time_t(std::mktime(&tm));
-            row.timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(time_point.time_since_epoch()).count();
-            
-            row.station_id = station;
-            row.region = region;
-            row.temperature = temp;
-            row.humidity = hum;
-            row.pressure = press;
-            all_data.push_back(row);
-            station_data_indices[station].push_back(index++);
+            auto tp = std::chrono::system_clock::from_time_t(std::mktime(&tm));
+            long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()).count();
+            all_data.push_back({ms, ts, station, region, temp, hum, press});
         }
     } catch (const std::exception& e) {
-        std::cerr << "Erro ao ler o CSV: " << e.what() << std::endl;
+        std::cerr << "Erro ao ler CSV: " << e.what() << std::endl;
         return 1;
     }
 
-    // Prepara a fila de tarefas e o mapa de resultados
-    std::vector<std::string> station_tasks;
-    for(const auto& pair : station_data_indices) {
-        station_tasks.push_back(pair.first);
-    }
-    std::map<std::string, StationMetrics> results;
+    auto start = std::chrono::high_resolution_clock::now();
 
-    // Lança o pool de threads
-    std::vector<std::thread> threads;
-    for (int i = 0; i < num_threads; ++i) {
-        threads.emplace_back(worker_logic, std::ref(station_tasks), std::cref(station_data_indices), std::ref(all_data), std::ref(results));
-    }
-    for (auto& t : threads) {
-        t.join();
+    // Agrupamento por estação
+    std::map<std::string, std::vector<int>> station_indices;
+    for (int i = 0; i < all_data.size(); ++i) {
+        station_indices[all_data[i].station_id].push_back(i);
     }
 
-    // Cálculo Sequencial da Métrica 2 
-    std::vector<DataRow> clean_data;
-    for (const auto& row : all_data) {
-        if (!row.temp_is_anomaly && !row.hum_is_anomaly && !row.press_is_anomaly) {
-            clean_data.push_back(row);
-        }
-    }
-    // Ordena os dados limpos por tempo, crucial para a média móvel
-    std::sort(clean_data.begin(), clean_data.end(), [](const DataRow& a, const DataRow& b) {
-        return a.timestamp_ms < b.timestamp_ms;
-    });
+    std::vector<std::string> station_ids;
+    for (const auto& [station, _] : station_indices) station_ids.push_back(station);
 
-    std::map<std::string, std::vector<DataRow>> data_by_region;
-    for (const auto& row : clean_data) {
-        data_by_region[row.region].push_back(row);
-    }
-    
-    json moving_averages_json;
-    const int window_size = 10;
-    for (auto const& [region, region_data] : data_by_region) {
-        std::deque<double> temp_window, hum_window, press_window;
-        double temp_sum = 0, hum_sum = 0, press_sum = 0;
+    std::mutex mtx;
+    std::map<std::string, StationMetrics> station_results;
 
-        for (const auto& row : region_data) {
-            temp_window.push_back(row.temperature);
-            temp_sum += row.temperature;
-            hum_window.push_back(row.humidity);
-            hum_sum += row.humidity;
-            press_window.push_back(row.pressure);
-            press_sum += row.pressure;
-
-            if (temp_window.size() > window_size) {
-                temp_sum -= temp_window.front(); temp_window.pop_front();
-                hum_sum -= hum_window.front(); hum_window.pop_front();
-                press_sum -= press_window.front(); press_window.pop_front();
+    auto worker = [&]() {
+        while (true) {
+            std::string sid;
+            {
+                std::lock_guard<std::mutex> lock(mtx);
+                if (station_ids.empty()) break;
+                sid = station_ids.back();
+                station_ids.pop_back();
             }
-
-            json mov_avg_row;
-            mov_avg_row["timestamp"] = row.timestamp_ms; // Poderia formatar de volta para string
-            mov_avg_row["regiao"] = region;
-            mov_avg_row["temperatura_mov_avg"] = temp_sum / temp_window.size();
-            mov_avg_row["umidade_mov_avg"] = hum_sum / hum_window.size();
-            mov_avg_row["pressao_mov_avg"] = press_sum / press_window.size();
-            moving_averages_json[region].push_back(mov_avg_row);
+            StationMetrics result = process_station(all_data, station_indices[sid], sid);
+            {
+                std::lock_guard<std::mutex> lock(mtx);
+                station_results[sid] = result;
+            }
         }
+    };
+
+    std::vector<std::thread> threads;
+    for (int i = 0; i < num_threads; ++i) threads.emplace_back(worker);
+    for (auto& t : threads) t.join();
+
+    // Métrica 2
+    std::ofstream media_out("media_movel_regiao.jsonl");
+    std::map<std::string, std::deque<std::tuple<double, double, double>>> janela;
+
+    for (const auto& row : all_data) {
+        if (row.is_anomalous) continue;
+        auto& q = janela[row.region];
+        q.push_back({row.temperature, row.humidity, row.pressure});
+        if (q.size() > 10) q.pop_front();
+
+        double soma_temp = 0, soma_hum = 0, soma_pres = 0;
+        for (const auto& [t, h, p] : q) {
+            soma_temp += t;
+            soma_hum += h;
+            soma_pres += p;
+        }
+
+        size_t n = q.size();
+        json linha = {
+            {"timestamp", row.timestamp_str},
+            {"id_estacao", row.station_id},
+            {"regiao", row.region},
+            {"temperatura", soma_temp / n},
+            {"umidade", soma_hum / n},
+            {"pressao", soma_pres / n}
+        };
+        media_out << linha.dump() << "\n";
+    }
+    media_out.close();
+
+    auto end = std::chrono::high_resolution_clock::now();
+
+    json output;
+    output["tempo_execucao_ms"] = std::chrono::duration<double, std::milli>(end - start).count();
+    output["resultados_por_estacao"] = json::object();
+    for (const auto& [station, m] : station_results) {
+        output["resultados_por_estacao"][station] = {
+            {"percentual_anomalias", m.anomaly_percentages},
+            {"periodos_concorrentes", m.concurrent_anomaly_periods}
+        };
     }
 
-
-    auto end_time = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double, std::milli> elapsed = end_time - start_time;
-
-    // Agrega todos os resultados no JSON final
-    json final_json;
-    final_json["tempo_execucao_ms"] = elapsed.count();
-    final_json["resultados_por_estacao"] = results;
-    // Omitindo a média móvel do JSON para não poluir, mas ela foi calculada
-    // final_json["media_movel_por_regiao"] = moving_averages_json;
-
-    std::ofstream o(json_path);
-    o << std::setw(4) << final_json << std::endl;
-
-    std::cout << "Processamento C++ (Thread Pool) concluído em " << elapsed.count() << " ms." << std::endl;
-
+    std::ofstream(json_path) << std::setw(4) << output << std::endl;
+    std::cout << "Processamento concluído em " << output["tempo_execucao_ms"] << " ms\n";
+    std::cout << "Média móvel salva em media_movel_regiao.jsonl\n";
     return 0;
 }

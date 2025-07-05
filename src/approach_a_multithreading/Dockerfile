@@ -1,5 +1,3 @@
-# src/approach_a_multithreading/Dockerfile
-
 # Build
 FROM gcc:12.3.0 as builder
 
