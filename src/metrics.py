@@ -99,12 +99,32 @@ if __name__ == '__main__':
                 "periodos_concorrentes": metric_3.get(station, 0)
             }
             
-        metric_2_df = resultados_df['media_movel_regiao']
-        metric_2_df['timestamp'] = metric_2_df['timestamp'].astype(str)
+        # metric_2_df = resultados_df['media_movel_regiao']
+        # metric_2_df['timestamp'] = metric_2_df['timestamp'].astype(str)
         
-        # Agrupa os resultados da média móvel por região
+        # # Agrupa os resultados da média móvel por região
+        # for region, group_df in metric_2_df.groupby('regiao'):
+        #     final_json_output["media_movel_por_regiao"][region] = group_df.to_dict('records')
+        
+        # output_path = Path("data/resultado_referencia.json")
+        # with open(output_path, 'w') as f:
+        #     json.dump(final_json_output, f, indent=4)
+        
+        # print(f"\nResultados de referência salvos em: {output_path}")
+        # print(f"Tempo de execução: {duration_ms:.2f} ms")
+        
+        metric_2_df = resultados_df['media_movel_regiao']
+        
         for region, group_df in metric_2_df.groupby('regiao'):
-            final_json_output["media_movel_por_regiao"][region] = group_df.to_dict('records')
+            # Pega os 5 primeiros e 5 últimos registros do grupo
+            if len(group_df) > 10:
+                sample_df = pd.concat([group_df.head(5), group_df.tail(5)])
+            else:
+                sample_df = group_df
+            
+            # Converte a coluna de timestamp para string para ser compatível com JSON
+            sample_df['timestamp'] = sample_df['timestamp'].astype(str)
+            final_json_output["media_movel_por_regiao_amostra"][region] = sample_df.to_dict('records')
         
         output_path = Path("data/resultado_referencia.json")
         with open(output_path, 'w') as f:
