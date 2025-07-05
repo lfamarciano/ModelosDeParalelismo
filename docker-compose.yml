@@ -38,3 +38,19 @@ services:
     
     volumes:
       - ./data:/app/data
+  
+  # Define o serviço do Worker, que é baseado na mesma imagem python-app
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src
+    depends_on:
+      - rabbitmq
+      - redis
+    environment:
+      - PYTHONPATH=/app
+    # O comando que o worker vai executar ao iniciar
+    command: python src/approach_b_message_broker/worker.py
