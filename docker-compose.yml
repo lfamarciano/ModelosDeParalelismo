@@ -10,6 +10,18 @@
 version: '3.8'
 
 services:
+  # Serviço do RabbitMQ
+  rabbitmq:
+    image: "rabbitmq:3.13-management"
+    ports:
+      - "5672:5672"  # Porta para a aplicação se conectar
+      - "15672:15672" # Porta para a interface de gerenciamento web
+
+  # Serviço do Redis para armazenar resultados
+  redis:
+    image: "redis:7.2-alpine"
+    ports:
+      - "6379:6379"
   # Serviço para executar os scripts Python
   python-app:
     build:
