@@ -1,56 +1,45 @@
-# docker-compose.yml
-# Modelo de comando para executar um serviço:
-# docker-compose run <serviço> <comando a ser executado dentro do contêiner>
-# Exemplos:
-# > docker-compose run --rm python-app python src/data_generator.py 12 60 0.02
-# > docker-compose run --rm cpp-app data/dados_meteorologicos.csv data/resultado_cpp.json 4
-# > docker-compose run --rm python-app python src/metrics.py
-# > docker-compose run --rm python-app python src/compare_results.py data/resultado_referencia.json data/resultado_cpp.json
 
 version: '3.8'
 
 services:
-  # Serviço do RabbitMQ
   rabbitmq:
-    image: "rabbitmq:3.13-management"
+    image: rabbitmq:3-management
     ports:
-      - "5672:5672"  # Porta para a aplicação se conectar
-      - "15672:15672" # Porta para a interface de gerenciamento web
+      - "5672:5672"
+      - "15672:15672"
 
-  # Serviço do Redis para armazenar resultados
-  redis:
-    image: "redis:7.2-alpine"
-    ports:
-      - "6379:6379"
-  # Serviço para executar os scripts Python
-  python-app:
-    build:
-      context: . # raiz do projeto
-      dockerfile: Dockerfile.python
-    volumes:
-      - ./data:/app/data
-
-  # Serviço para executar a Abordagem A (C++)
-  cpp-app:
-    build:
-      context: ./src/approach_a_multithreading
-      dockerfile: Dockerfile
-    
-    volumes:
-      - ./data:/app/data
-  
-  # Define o serviço do Worker, que é baseado na mesma imagem python-app
-  worker:
+  data-generator:
     build:
       context: .
-      dockerfile: Dockerfile.python
+      dockerfile: data-generator/Dockerfile
     volumes:
       - ./data:/app/data
-      - ./src:/app/src
+    container_name: data-generator
+
+  local-processing:
+    build:
+      context: .
+      dockerfile: approach_a_local/Dockerfile
+    volumes:
+      - ./data:/app/data
+    container_name: local-processing
+
+  message-broker:
+    build:
+      context: .
+      dockerfile: approach_b_message_broker/Dockerfile
+    volumes:
+      - ./data:/app/data
     depends_on:
       - rabbitmq
-      - redis
-    environment:
-      - PYTHONPATH=/app
-    # O comando que o worker vai executar ao iniciar
-    command: python src/approach_b_message_broker/worker.py
+    container_name: message-broker
+
+  spark-processing:
+    build:
+      context: .
+      dockerfile: approach_c_spark/Dockerfile
+    volumes:
+      - ./data:/app/data
+      - ./output:/app/output
+    container_name: spark-processing
+
