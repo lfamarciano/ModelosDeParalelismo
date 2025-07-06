@@ -43,3 +43,17 @@ services:
       - ./output:/app/output
     container_name: spark-processing
 
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+      - ./output:/app/output
+      - ./experimentos_tempos.csv:/app/experimentos_tempos.csv
+    depends_on:
+      - local-processing
+      - message-broker
+      - spark-processing
