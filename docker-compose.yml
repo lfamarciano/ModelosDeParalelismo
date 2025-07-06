@@ -1,59 +1,51 @@
 
 version: '3.8'
 
+volumes:
+  dados_compartilhados:
+
 services:
+  data-generator:
+    image: data-generator
+    volumes:
+      - dados_compartilhados:/app/data
+    working_dir: /app
+    entrypoint: ""
+
+  local-processing:
+    image: local-processing
+    volumes:
+      - dados_compartilhados:/app/data
+    working_dir: /app
+    entrypoint: ""
+
+  spark-processing:
+    image: spark-processing
+    volumes:
+      - dados_compartilhados:/app/data
+    working_dir: /app
+    environment:
+      - SPARK_PARALLELISM=4 
+    entrypoint: ""
+
   rabbitmq:
     image: rabbitmq:3-management
     ports:
       - "5672:5672"
       - "15672:15672"
-
-  data-generator:
-    build:
-      context: .
-      dockerfile: src/Dockerfile
-    volumes:
-      - ./data:/app/data
-    container_name: data-generator
-
-  local-processing:
-    build:
-      context: .
-      dockerfile: src/approach_a_local/Dockerfile
-    volumes:
-      - ./data:/app/data
-    container_name: local-processing
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
 
   message-broker:
-    build:
-      context: .
-      dockerfile: src/approach_b_message_broker/Dockerfile
-    volumes:
-      - ./data:/app/data
+    image: message-broker
     depends_on:
       - rabbitmq
-    container_name: message-broker
-
-  spark-processing:
-    build:
-      context: .
-      dockerfile: src/approach_c_spark/Dockerfile
     volumes:
-      - ./data:/app/data
-      - ./output:/app/output
-    container_name: spark-processing
-
-  dashboard:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    ports:
-      - "8501:8501"
-    volumes:
-      - ./data:/app/data
-      - ./output:/app/output
-      - ./experimentos_tempos.csv:/app/experimentos_tempos.csv
-    depends_on:
-      - local-processing
-      - message-broker
-      - spark-processing
+      - dados_compartilhados:/app/data
+    environment:
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+    working_dir: /app
+    entrypoint: ""
+    command: celery -A tasks worker --loglevel=info --concurrency=${CELERY_CONCURRENCY:-1}

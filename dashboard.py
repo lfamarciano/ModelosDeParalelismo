@@ -2,12 +2,13 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import subprocess
-import threading
 import time
 import os
+import json
 
-# Caminho para o csv onde os tempos serão armazenados
+# Caminho onde os tempos serão armazenados (simples CSV)
 TEMPOS_PATH = "./experimentos_tempos.csv"
+OUTPUT_PATH = "./data/tempo_execucao.json"
 
 # Abordagens disponíveis
 ABORDAGENS = [
@@ -26,23 +27,41 @@ def limpar_resultados():
         os.remove(TEMPOS_PATH)
     inicializar_csv()
 
-@st.cache_data(show_spinner=False)
 def carregar_resultados():
+    if os.path.isdir(TEMPOS_PATH):
+        st.error(f"O caminho '{TEMPOS_PATH}' é um diretório, mas deveria ser um arquivo CSV. Remova ou renomeie a pasta.")
+        return pd.DataFrame(columns=["abordagem", "paralelismo", "tempo_seg", "n_estacoes", "n_eventos"])
     if os.path.exists(TEMPOS_PATH):
         return pd.read_csv(TEMPOS_PATH)
     else:
         return pd.DataFrame(columns=["abordagem", "paralelismo", "tempo_seg", "n_estacoes", "n_eventos"])
 
+def ler_tempo_execucao():
+    try:
+        with open(OUTPUT_PATH, "r") as f:
+            data = json.load(f)
+            return data.get("tempo", None)
+    except:
+        return None
+
 def rodar_experimento(abordagem, paralelismo, n_estacoes, n_eventos):
     st.session_state[f"{abordagem}-{paralelismo}"] = "Executando..."
-    start = time.perf_counter()
+
+    if os.path.exists(OUTPUT_PATH):
+        os.remove(OUTPUT_PATH)
 
     if abordagem == "local-processing":
         subprocess.run(["docker", "run", "--rm", "-v", f"{os.getcwd()}/data:/app/data",
                         "local-processing", "python", "process_local.py", str(paralelismo)])
 
     elif abordagem == "message-broker":
-        subprocess.run(["docker", "compose", "up", "--abort-on-container-exit", "message-broker"], stdout=subprocess.DEVNULL)
+        subprocess.run(["docker", "compose", "up", "-d", "rabbitmq"])
+        subprocess.run([
+            "docker", "compose", "run", "--rm",
+            "-e", f"CELERY_CONCURRENCY={paralelismo}",
+            "message-broker"
+        ])
+        subprocess.run(["docker", "compose", "stop", "message-broker"])
 
     elif abordagem == "spark-processing":
         subprocess.run(["docker", "run", "--rm",
@@ -50,32 +69,29 @@ def rodar_experimento(abordagem, paralelismo, n_estacoes, n_eventos):
                         "-e", f"SPARK_PARALLELISM={paralelismo}",
                         "spark-processing"])
 
-    fim = time.perf_counter()
-    duracao = fim - start
+    tempo_execucao = ler_tempo_execucao()
+    if tempo_execucao is None:
+        tempo_execucao = -1
 
-    # Atualiza CSV
     df = carregar_resultados()
     df = pd.concat([
         df,
-        pd.DataFrame([{ "abordagem": abordagem, "paralelismo": paralelismo, "tempo_seg": duracao,
+        pd.DataFrame([{ "abordagem": abordagem, "paralelismo": paralelismo, "tempo_seg": tempo_execucao,
                          "n_estacoes": n_estacoes, "n_eventos": n_eventos }])
     ])
     df.to_csv(TEMPOS_PATH, index=False)
-    st.session_state[f"{abordagem}-{paralelismo}"] = f"✅ {duracao:.2f} s"
+    st.session_state[f"{abordagem}-{paralelismo}"] = f"✅ {tempo_execucao:.2f} s"
 
 def iniciar_experimentos(paralelismos, n_eventos, n_estacoes):
+    # Gerar os dados primeiro
+    st.info("🔧 Gerando dados simulados...")
     subprocess.run(["docker", "compose", "run", "--rm", "data-generator",
                     "python", "data_generator.py", str(n_estacoes), str(n_eventos), "0.02"])
 
-    threads = []
+    # Rodar abordagens sequencialmente
     for p in paralelismos:
         for abordagem in ABORDAGENS:
-            t = threading.Thread(target=rodar_experimento, args=(abordagem, p, n_estacoes, n_eventos))
-            t.start()
-            threads.append(t)
-
-    for t in threads:
-        t.join()
+            rodar_experimento(abordagem, p, n_estacoes, n_eventos)
 
 # --- STREAMLIT APP ---
 st.title("Painel de Experimentos de Processamento Paralelo")
@@ -94,7 +110,7 @@ paralelismos = [2 ** i for i in range(int(max_paralelismo).bit_length()) if 2 **
 col_a, col_b = st.columns(2)
 with col_a:
     if st.button("Iniciar Experimento"):
-        threading.Thread(target=iniciar_experimentos, args=(paralelismos, n_eventos, n_estacoes)).start()
+        iniciar_experimentos(paralelismos, n_eventos, n_estacoes)
 with col_b:
     if st.button("Limpar Resultados"):
         limpar_resultados()
@@ -112,6 +128,6 @@ if not df.empty:
         dados = df[df["abordagem"] == abordagem]
         ax.plot(dados["paralelismo"], dados["tempo_seg"], label=abordagem)
     ax.set_xlabel("Paralelismo")
-    ax.set_ylabel("Tempo (s)")
+    ax.set_ylabel("Tempo (ms)")
     ax.legend()
     st.pyplot(fig)

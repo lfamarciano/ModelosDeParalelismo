@@ -78,9 +78,9 @@ def main():
         sys.exit(1)
 
     if compare_dicts(data1, data2):
-        print("✅ SUCESSO: Os resultados são consistentes!")
+        print("SUCESSO: Os resultados são consistentes!")
     else:
-        print("\n❌ FALHA: Foram encontradas diferenças nos resultados.")
+        print("\nFALHA: Foram encontradas diferenças nos resultados.")
 
 if __name__ == "__main__":
     main()

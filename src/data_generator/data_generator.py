@@ -2,7 +2,6 @@
 import pandas as pd
 import numpy as np
 from pathlib import Path
-import datetime
 import time
 
 def generate_data(num_stations: int, num_events_per_station: int, anomaly_percentage: float, start_date_str: str = "2025-07-01"):

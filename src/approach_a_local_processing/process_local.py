@@ -1,9 +1,9 @@
 import pandas as pd
 import numpy as np
 from multiprocessing import Process, Manager
-from datetime import timedelta
 import sys
 import time
+import json
 
 THRESHOLDS = {
     "temperatura": (-10, 45),
@@ -110,9 +110,11 @@ def main():
         end_time = time.perf_counter()
         duration_ms = (end_time - start_time) * 1000
         
-        pd.DataFrame(anomalias).to_csv("data/percentuais_anomalias.csv", index=False)
-        pd.DataFrame(coocorrencias).to_csv("data/periodos_coocorrencia.csv", index=False)
-        medias_moveis.to_csv("data/media_movel_regiao.csv", index=False)
+        # pd.DataFrame(anomalias).to_csv("data/percentuais_anomalias.csv", index=False)
+        # pd.DataFrame(coocorrencias).to_csv("data/periodos_coocorrencia.csv", index=False)
+        # medias_moveis.to_csv("data/media_movel_regiao.csv", index=False)
+        with open("data/tempo_execucao.json", "w") as f:
+            json.dump({"tempo": duration_ms}, f)
 
     print("\nProcessamento finalizado com multiprocessamento local.")
     print(f"Tempo total: {duration_ms:.2f} ms")
