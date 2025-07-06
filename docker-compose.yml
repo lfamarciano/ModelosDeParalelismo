@@ -11,7 +11,7 @@ services:
   data-generator:
     build:
       context: .
-      dockerfile: data-generator/Dockerfile
+      dockerfile: src/Dockerfile
     volumes:
       - ./data:/app/data
     container_name: data-generator
@@ -19,7 +19,7 @@ services:
   local-processing:
     build:
       context: .
-      dockerfile: approach_a_local/Dockerfile
+      dockerfile: src/approach_a_local/Dockerfile
     volumes:
       - ./data:/app/data
     container_name: local-processing
@@ -27,7 +27,7 @@ services:
   message-broker:
     build:
       context: .
-      dockerfile: approach_b_message_broker/Dockerfile
+      dockerfile: src/approach_b_message_broker/Dockerfile
     volumes:
       - ./data:/app/data
     depends_on:
@@ -37,7 +37,7 @@ services:
   spark-processing:
     build:
       context: .
-      dockerfile: approach_c_spark/Dockerfile
+      dockerfile: src/approach_c_spark/Dockerfile
     volumes:
       - ./data:/app/data
       - ./output:/app/output
@@ -46,7 +46,7 @@ services:
   dashboard:
     build:
       context: .
-      dockerfile: dashboard/Dockerfile
+      dockerfile: Dockerfile
     ports:
       - "8501:8501"
     volumes:
