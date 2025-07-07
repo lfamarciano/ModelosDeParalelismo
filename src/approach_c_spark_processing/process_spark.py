@@ -42,6 +42,8 @@ def validar_corretude(df_processado):
 def main():
     spark_parallelism = os.environ.get("SPARK_PARALLELISM", "4")
     
+    output_path = "data/tempo_execucao.json"
+    
     spark = SparkSession.builder \
         .appName("MeteorologicalSparkProcessing") \
         .config("spark.default.parallelism", spark_parallelism) \
@@ -116,6 +118,10 @@ def main():
     final_results = {"tempo": duration_ms, "corretude": corretude_results}
     with open("data/tempo_execucao.json", "w") as f:
         json.dump(final_results, f)
+        
+    os.chmod(output_path, 0o666)
+
+    spark.stop()
 
 if __name__ == "__main__":
     main()

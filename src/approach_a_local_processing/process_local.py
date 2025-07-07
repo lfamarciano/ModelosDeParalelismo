@@ -5,6 +5,7 @@ import sys
 import time
 import json
 from pathlib import Path
+import os
 
 THRESHOLDS = {
     "temperatura": (-10, 45),
@@ -103,6 +104,8 @@ def main():
     if len(sys.argv) < 2:
         print("Uso: python process_local.py <num_processos>")
         sys.exit(1)
+    
+    output_path = "data/tempo_execucao.json"
 
     max_processes = int(sys.argv[1])
     df = pd.read_csv("data/dados_meteorologicos.csv", parse_dates=["timestamp"])
@@ -131,6 +134,8 @@ def main():
         final_results = {"tempo": duration_ms, "corretude": corretude_results}
         with open("data/tempo_execucao.json", "w") as f:
             json.dump(final_results, f)
+            
+        os.chmod(output_path, 0o666)
 
     print("\nProcessamento finalizado com multiprocessamento local.")
     print(f"Tempo total: {duration_ms:.2f} ms")

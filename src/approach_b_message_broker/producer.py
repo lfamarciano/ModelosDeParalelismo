@@ -33,6 +33,8 @@ def validar_corretude(df_processado):
 broker_url = os.environ.get("CELERY_BROKER_URL", "amqp://guest:guest@rabbitmq:5672//")
 app = Celery('tasks', broker=broker_url, backend='rpc://')
 
+output_path = "data/tempo_execucao.json"
+
 from tasks import (
     calcular_percentual_anomalias,
     calcular_periodos_coocorrencia,
@@ -93,6 +95,8 @@ corretude_results = validar_corretude(df_validacao)
 final_results = {"tempo": duration_ms, "corretude": corretude_results}
 with open("data/tempo_execucao.json", "w") as f:
     json.dump(final_results, f)
+    
+os.chmod(output_path, 0o666)
 
 # Salva os resultados
 # pd.DataFrame(sum(result_anomalias, [])).to_csv("data/percentuais_anomalias.csv", index=False)

@@ -5,6 +5,14 @@ import subprocess
 import time
 import os
 import json
+import platform 
+
+DOCKER_USER_PERMS = []
+if platform.system() != "Windows":
+    # Define permissões de usuário para o Docker, se não for Windows
+    user_id = os.getuid()
+    group_id = os.getgid()
+    DOCKER_USER_PERMS = ["-u", f"{user_id}:{group_id}"]
 
 # Caminho onde os tempos serão armazenados
 TEMPOS_PATH = "experimentos_tempos.csv"
@@ -55,8 +63,8 @@ def rodar_experimento(abordagem, paralelismo, n_estacoes, n_eventos, status_plac
     """Executa um único teste para uma abordagem com um nível de paralelismo."""
     status_placeholder.info(f"Executando: {abordagem} com paralelismo {paralelismo}...")
 
-    if os.path.exists(OUTPUT_PATH):
-        os.remove(OUTPUT_PATH)
+    # if os.path.exists(OUTPUT_PATH):
+    #     os.remove(OUTPUT_PATH)
 
     shared_volume = f"{os.getcwd()}/data:/app/data"
     # O nome da rede geralmente é <pasta_do_projeto>_default. Verifique com 'docker network ls'.
