@@ -20,7 +20,10 @@ ABORDAGENS = [
 def inicializar_csv():
     """Garante que o arquivo de resultados exista."""
     if not os.path.exists(TEMPOS_PATH):
-        df = pd.DataFrame(columns=["abordagem", "paralelismo", "tempo_seg", "n_estacoes", "n_eventos"])
+        colunas = [
+            "abordagem", "paralelismo", "tempo_seg", "n_estacoes", "n_eventos", "detectadas_ok"
+        ]
+        df = pd.DataFrame(columns=colunas)
         df.to_csv(TEMPOS_PATH, index=False)
 
 def limpar_resultados():
@@ -32,20 +35,21 @@ def limpar_resultados():
 def carregar_resultados():
     """Carrega os resultados do arquivo CSV."""
     if not os.path.exists(TEMPOS_PATH):
-        return pd.DataFrame(columns=["abordagem", "paralelismo", "tempo_seg", "n_estacoes", "n_eventos"])
+        return pd.DataFrame(columns=["abordagem", "paralelismo", "tempo_seg", "n_estacoes", "n_eventos" ,"detectadas_ok"])
     return pd.read_csv(TEMPOS_PATH)
 
-def ler_tempo_execucao():
-    """Lê o tempo de execução do último experimento a partir do arquivo JSON."""
+def ler_resultado_experimento():
+    """Lê o tempo e os dados de corretude do arquivo JSON."""
     try:
         with open(OUTPUT_PATH, "r") as f:
             data = json.load(f)
-            tempo_ms = data.get("tempo", None)
-            # Converte de milissegundos para segundos
-            return tempo_ms / 1000 if tempo_ms is not None else -1.0
+            tempo_seg = data.get("tempo", -1.0) / 1000 if data.get("tempo", -1.0) > 0 else -1.0
+            return {
+                "tempo": tempo_seg,
+                "corretude": data.get("corretude", None)
+            }
     except (FileNotFoundError, json.JSONDecodeError):
-        # Retorna -1 em caso de erro (arquivo não encontrado, etc.)
-        return -1.0
+        return {"tempo": -1.0, "corretude": None}
 
 def rodar_experimento(abordagem, paralelismo, n_estacoes, n_eventos, status_placeholder):
     """Executa um único teste para uma abordagem com um nível de paralelismo."""
@@ -98,13 +102,23 @@ def rodar_experimento(abordagem, paralelismo, n_estacoes, n_eventos, status_plac
                "spark-processing", "python3", "process_spark.py"]
         subprocess.run(cmd, **capture_output_args)
 
-    tempo_execucao = ler_tempo_execucao()
+    resultado = ler_resultado_experimento()
+    tempo_execucao = resultado["tempo"]
+    corretude = resultado["corretude"]
+    
+    # Prepara a nova linha com todos os dados
+    new_row_data = {
+        "abordagem": abordagem,
+        "paralelismo": paralelismo,
+        "tempo_seg": tempo_execucao,
+        "n_estacoes": n_estacoes,
+        "n_eventos": n_eventos,
+        "detectadas_ok": corretude.get("verdadeiros_positivos") if corretude else "N/A",
+    }
 
-    # Salva o resultado
     df = carregar_resultados()
-    new_row = pd.DataFrame([{"abordagem": abordagem, "paralelismo": paralelismo, "tempo_seg": tempo_execucao,
-                             "n_estacoes": n_estacoes, "n_eventos": n_eventos}])
-    df = pd.concat([df, new_row], ignore_index=True)
+    # Concatena a nova linha ao DataFrame de resultados
+    df = pd.concat([df, pd.DataFrame([new_row_data])], ignore_index=True)
     df.to_csv(TEMPOS_PATH, index=False)
     
     status_placeholder.success(f"Finalizado: {abordagem} (paralelismo {paralelismo}) em {tempo_execucao:.2f}s")
@@ -140,7 +154,7 @@ def iniciar_experimentos(paralelismos, n_eventos, n_estacoes):
                     dados = df_resultados[df_resultados["abordagem"] == ab].sort_values("paralelismo")
                     dados = dados[dados["tempo_seg"] > 0] # Filtra execuções com erro
                     ax.plot(dados["paralelismo"], dados["tempo_seg"], marker='o', linestyle='-', label=ab)
-                ax.set_xlabel("Grau de Paralelismo (Escala Logarítmica)")
+                ax.set_xlabel("Grau de Paralelismo (Escala Log)")
                 ax.set_ylabel("Tempo de Execução (segundos)")
                 ax.set_title("Desempenho das Abordagens de Paralelismo")
                 ax.set_xscale('log', base=2)

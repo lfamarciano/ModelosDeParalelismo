@@ -4,6 +4,7 @@ from multiprocessing import Process, Manager
 import sys
 import time
 import json
+from pathlib import Path
 
 THRESHOLDS = {
     "temperatura": (-10, 45),
@@ -16,6 +17,18 @@ def detectar_anomalias(df):
         min_val, max_val = THRESHOLDS[sensor]
         df[f"{sensor}_anormal"] = ~df[sensor].between(min_val, max_val)
     return df
+
+def validar_corretude(df_processado):
+    gabarito_path = Path("data/anomalias_reais.csv")
+    if not gabarito_path.exists(): return None
+    gabarito_df = pd.read_csv(gabarito_path, parse_dates=["timestamp"])
+    detectadas_df = df_processado.melt(id_vars=["timestamp", "id_estacao"], value_vars=["temperatura_anormal", "umidade_anormal", "pressao_anormal"], var_name="sensor_anomalo", value_name="is_anormal")
+    detectadas_df = detectadas_df[detectadas_df["is_anormal"]]
+    detectadas_df["sensor_anomalo"] = detectadas_df["sensor_anomalo"].str.replace("_anormal", "")
+    merged_df = pd.merge(gabarito_df, detectadas_df, on=["timestamp", "id_estacao", "sensor_anomalo"], how='outer', indicator=True)
+    return {
+        "verdadeiros_positivos": len(merged_df[merged_df['_merge'] == 'both']),
+    }
 
 def worker_anomalias(estacao_df, output_list):
     id_est = estacao_df["id_estacao"].iloc[0]
@@ -100,21 +113,24 @@ def main():
         print(f"Usando até {max_processes} processos paralelos...\n")
 
         print("Processando percentuais de anomalias...")
-        anomalias = processa_anomalias(df, manager, max_processes)
+        processa_anomalias(df, manager, max_processes)
 
         print("Processando períodos de coocorrência...")
-        coocorrencias = processa_coocorrencias(df, manager, max_processes)
+        processa_coocorrencias(df, manager, max_processes)
 
         print("Processando médias móveis por região...")
-        medias_moveis = processa_medias_moveis(df, manager, max_processes)
+        processa_medias_moveis(df, manager, max_processes)
         end_time = time.perf_counter()
         duration_ms = (end_time - start_time) * 1000
         
         # pd.DataFrame(anomalias).to_csv("data/percentuais_anomalias.csv", index=False)
         # pd.DataFrame(coocorrencias).to_csv("data/periodos_coocorrencia.csv", index=False)
         # medias_moveis.to_csv("data/media_movel_regiao.csv", index=False)
+        # Validação e salvamento do resultado combinado
+        corretude_results = validar_corretude(df)
+        final_results = {"tempo": duration_ms, "corretude": corretude_results}
         with open("data/tempo_execucao.json", "w") as f:
-            json.dump({"tempo": duration_ms}, f)
+            json.dump(final_results, f)
 
     print("\nProcessamento finalizado com multiprocessamento local.")
     print(f"Tempo total: {duration_ms:.2f} ms")

@@ -3,6 +3,8 @@ from pyspark.sql.functions import col, avg, window, countDistinct
 import time
 import json
 import os
+import pandas as pd
+from pathlib import Path
 
 THRESHOLDS = {
     "temperatura": (-10, 45),
@@ -10,9 +12,34 @@ THRESHOLDS = {
     "pressao": (940, 1060)
 }
 
-def main():
-    start = time.perf_counter()
+def detectar_anomalias(df):
+    for sensor in ["temperatura", "umidade", "pressao"]:
+        min_val, max_val = THRESHOLDS[sensor]
+        df[f"{sensor}_anormal"] = ~df[sensor].between(min_val, max_val)
+    return df
 
+def validar_corretude(df_processado):
+    gabarito_path = Path("data/anomalias_reais.csv")
+    if not gabarito_path.exists(): return None
+    gabarito_df = pd.read_csv(gabarito_path, parse_dates=["timestamp"])
+    detectadas_df = df_processado.melt(
+        id_vars=["timestamp", "id_estacao"],
+        value_vars=["temperatura_anormal", "umidade_anormal", "pressao_anormal"],
+        var_name="sensor_anomalo",
+        value_name="is_anormal"
+    )
+    detectadas_df = detectadas_df[detectadas_df["is_anormal"]]
+    detectadas_df["sensor_anomalo"] = detectadas_df["sensor_anomalo"].str.replace("_anormal", "")
+    merged_df = pd.merge(
+        gabarito_df, detectadas_df,
+        on=["timestamp", "id_estacao", "sensor_anomalo"],
+        how='outer', indicator=True
+    )
+    return {
+        "verdadeiros_positivos": len(merged_df[merged_df['_merge'] == 'both']),
+    }
+
+def main():
     spark_parallelism = os.environ.get("SPARK_PARALLELISM", "4")
     
     spark = SparkSession.builder \
@@ -20,6 +47,8 @@ def main():
         .config("spark.default.parallelism", spark_parallelism) \
         .getOrCreate()
 
+    start = time.perf_counter()
+    
     df = spark.read.csv("/app/data/dados_meteorologicos.csv", header=True, inferSchema=True)
     df = df.withColumn("timestamp", col("timestamp").cast("timestamp"))
 
@@ -78,9 +107,15 @@ def main():
 
     end = time.perf_counter()
     duration_ms = (end - start) * 1000
+    
+    # Carrega novamente o CSV original em pandas para análise de corretude
+    df_pandas = pd.read_csv("data/dados_meteorologicos.csv", parse_dates=["timestamp"])
+    df_pandas = detectar_anomalias(df_pandas)
+    corretude_results = validar_corretude(df_pandas)
+    
+    final_results = {"tempo": duration_ms, "corretude": corretude_results}
     with open("data/tempo_execucao.json", "w") as f:
-        json.dump({"tempo": duration_ms}, f)
-    print(f"Spark finalizado em {end - start:.2f} segundos.")
+        json.dump(final_results, f)
 
 if __name__ == "__main__":
     main()
