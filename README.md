@@ -1,4 +1,4 @@
-# ModelosDeParalelismo
+# Modelos De Paralelismo
 Repositório para o trabalho final da disciplina de Computação Escalável. O objetivo é realizar um experimento comparando diferentes modelos de paralelismo, através da implementação de soluções de um mesmo problema para cada abordagem.
 
 ## Guia de execução:
@@ -16,6 +16,7 @@ Repositório para o trabalho final da disciplina de Computação Escalável. O o
 
  Na raiz do projeto, rode:
  ```
+chmod +x build_all.sh
 ./build_all.sh
  ```
 

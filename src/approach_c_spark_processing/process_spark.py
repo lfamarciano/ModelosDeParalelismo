@@ -2,6 +2,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, avg, window, countDistinct
 import time
 import json
+import os
 
 THRESHOLDS = {
     "temperatura": (-10, 45),
@@ -12,8 +13,11 @@ THRESHOLDS = {
 def main():
     start = time.perf_counter()
 
+    spark_parallelism = os.environ.get("SPARK_PARALLELISM", "4")
+    
     spark = SparkSession.builder \
         .appName("MeteorologicalSparkProcessing") \
+        .config("spark.default.parallelism", spark_parallelism) \
         .getOrCreate()
 
     df = spark.read.csv("/app/data/dados_meteorologicos.csv", header=True, inferSchema=True)

@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 
 app = Celery('tasks')
-app.config_from_object('approach_b_message_broker.celeryconfig')
+app.config_from_object('celeryconfig')
 
 THRESHOLDS = {
     "temperatura": (-10, 45),
