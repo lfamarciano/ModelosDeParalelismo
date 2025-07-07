@@ -150,7 +150,7 @@ def iniciar_experimentos(paralelismos, n_eventos, n_estacoes):
                 ax.grid(True, which="both", ls="--")
                 st.pyplot(fig)
 
-    status_placeholder.success("✅ Todos os experimentos foram finalizados!")
+    status_placeholder.success("Todos os experimentos foram finalizados!")
 
 # Interface do Streamlit
 st.set_page_config(layout="wide")

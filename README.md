@@ -14,11 +14,12 @@ Repositório para o trabalho final da disciplina de Computação Escalável. O o
 
  ### 2) Build das imagens:
 
- Na raiz do projeto, rode:
+ Certifiqui-se que o docker está "ativo" no seu computador com o comando `docker ps`. Após, na raiz do projeto, rode:
  ```
 chmod +x build_all.sh
 ./build_all.sh
  ```
+ O build pode demorar um pouco.
 
  ### 3) Executar o dashboard
  O dashboard permite gerar os dados e testar as três abordagens de forma sequencial:

@@ -36,10 +36,31 @@ for _, g in df.groupby("regiao"):
 # Agrupa todas as tarefas para execução e aguarda a conclusão
 all_tasks = group(tasks_anomalias + tasks_cooc + tasks_moving_avg)
 result = all_tasks.apply_async()
-result.get() # Bloqueia a execução até que todas as tarefas no grupo terminem
 
-end_time = time.perf_counter()
-duration_ms = (end_time - start_time) * 1000
+# Define o tempo de execução como -1 (erro) por padrão
+duration_ms = -1.0
+
+try:
+    # Se as tarefas não terminarem nesse tempo, uma exceção TimeoutError será levantada,
+    # impedindo que o programa congele indefinidamente.
+    print("Aguardando a conclusão das tarefas do Celery (timeout em 360s)...")
+    result.get(timeout=360)
+    
+    # Se get() retornar sem erro, o processamento foi bem-sucedido
+    end_time = time.perf_counter()
+    duration_ms = (end_time - start_time) * 1000
+    print(f"Processamento com Celery + RabbitMQ finalizado com sucesso.")
+
+except TimeoutError:
+    print("\nERRO CRÍTICO: O processamento com Celery excedeu o tempo limite!")
+    print("Isso pode indicar que os workers estão sobrecarregados ou travaram.")
+    # Tenta cancelar as tarefas pendentes para limpar os recursos
+    result.revoke(terminate=True)
+
+except Exception as e:
+    print(f"\nERRO CRÍTICO: Uma exceção ocorreu durante a espera dos resultados do Celery: {e}")
+    result.revoke(terminate=True)
+    
 with open("data/tempo_execucao.json", "w") as f:
     json.dump({"tempo": duration_ms}, f)
 
